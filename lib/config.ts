@@ -56,6 +56,7 @@ export const PRODUCT_LABEL_MAP: Record<string, ProductCode> = {
     鸭: "duck",
     猪: "pork",
     脚: "feet",
+    尖: "feet",
     牛: "beef",
     鸡: "chicken",
     辣: "spicy",

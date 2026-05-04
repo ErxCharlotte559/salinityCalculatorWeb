@@ -1,9 +1,4 @@
-import type {
-    CalculationItem,
-    ExtractedData,
-    ExtractedItem,
-    WeightedRawData,
-} from "./types";
+import type { CalculationItem, ExtractedData, ExtractedItem } from "./types";
 
 import {
     getProductCode,
@@ -11,107 +6,62 @@ import {
     type IngredientCode,
 } from "./config";
 
-function isTemperatureValid(temp: number | null): boolean {
-    if (temp === null) return false;
-    return temp >= 19 && temp <= 21;
-}
+export function calculateRealSalinity(
+    originalWeight: number | null,
+    mixedWeight: number | null,
+    meterReading: number | null,
+): number | null {
+    if (meterReading === null) {
+        return null;
+    }
 
-export function calculateWeightedSalinity(raw: WeightedRawData): number | null {
-    const { tare1, total1, salinity1, tare2, total2 } = raw;
+    // 普通品类：只有盐度计读数
+    if (originalWeight === null && mixedWeight === null) {
+        return meterReading;
+    }
 
+    // 脚 / 牛：有原液重量、混合液重量
     if (
-        tare1 === null ||
-        total1 === null ||
-        salinity1 === null ||
-        tare2 === null ||
-        total2 === null
+        originalWeight === null ||
+        mixedWeight === null ||
+        originalWeight <= 0
     ) {
         return null;
     }
 
-    const liquid1 = total1 - tare1;
-    const liquid2 = total2 - tare2;
-
-    if (liquid1 < 0 || liquid2 <= 0) {
-        return null;
-    }
-
-    return ((liquid1 + liquid2) * salinity1) / liquid2;
+    return (mixedWeight * meterReading) / originalWeight;
 }
 
 export function recalculateItem(item: CalculationItem): CalculationItem {
-    if (item.type !== "weighted" || !item.weighted) {
-        const temperatureValid = isTemperatureValid(item.temperature);
-
-        return {
-            ...item,
-            temperatureValid,
-        };
-    }
-
-    const salinity = calculateWeightedSalinity(item.weighted);
-    const temperature = item.weighted.temperature;
-    const temperatureValid = isTemperatureValid(temperature);
-
     return {
         ...item,
-        salinity,
-        temperature,
-        temperatureValid,
+        salinity: calculateRealSalinity(
+            item.originalWeight,
+            item.mixedWeight,
+            item.meterReading,
+        ),
     };
 }
 
-function getSimpleItemResult(item: ExtractedItem): CalculationItem {
-    const salinity = item.values?.[0] ?? null;
-    const temperature = item.values?.[1] ?? null;
-    const temperatureValid = isTemperatureValid(temperature);
-
+function getCalculationItem(item: ExtractedItem): CalculationItem {
     return {
         label: item.label ?? "未知",
-        salinity,
-        temperature,
-        temperatureValid,
+        originalWeight: item.originalWeight,
+        mixedWeight: item.mixedWeight,
+        meterReading: item.meterReading,
+        salinity: calculateRealSalinity(
+            item.originalWeight,
+            item.mixedWeight,
+            item.meterReading,
+        ),
         raw: item.raw,
-        type: "simple",
     };
-}
-
-function getWeightedItemResult(item: ExtractedItem): CalculationItem {
-    const row1 = item.rows?.[0];
-    const row2 = item.rows?.[1];
-
-    const weighted: WeightedRawData = {
-        tare1: row1?.time ?? null,
-        total1: row1?.bracket ?? null,
-        salinity1: row1?.value ?? null,
-        tare2: row2?.time ?? null,
-        total2: row2?.bracket ?? null,
-        temperature: row2?.value ?? null,
-    };
-
-    const base: CalculationItem = {
-        label: item.label ?? "未知",
-        salinity: null,
-        temperature: weighted.temperature,
-        temperatureValid: false,
-        raw: item.raw,
-        type: "weighted",
-        weighted,
-    };
-
-    return recalculateItem(base);
 }
 
 export function calculateFromExtractedData(
     data: ExtractedData,
 ): CalculationItem[] {
-    return data.items.map((item) => {
-        if (item.rows && item.rows.length > 0) {
-            return getWeightedItemResult(item);
-        }
-
-        return getSimpleItemResult(item);
-    });
+    return data.items.map(getCalculationItem);
 }
 
 export function calculateSaltToAdd(
@@ -119,6 +69,7 @@ export function calculateSaltToAdd(
     currentSalinity: number | null,
     capacity: number | null | undefined,
 ): number | null {
+    console.log("checking readings");
     if (
         targetSalinity === null ||
         currentSalinity === null ||
@@ -127,9 +78,10 @@ export function calculateSaltToAdd(
     ) {
         return null;
     }
-
-    const result = (targetSalinity - currentSalinity) * capacity * 10;
-    return Math.max(result, 0);
+    console.log(
+        `Calculating salt to add: target=${targetSalinity}, current=${currentSalinity}, capacity=${capacity}`,
+    );
+    return Math.max((targetSalinity - currentSalinity) * capacity * 10, 0);
 }
 
 export function calculateIngredients(
@@ -220,7 +172,7 @@ function calculateSpecialIngredient(
 
         if (msg === undefined) return null;
 
-        return msg >= 50 ? msg - 10 : msg - 5;
+        return msg >= 50 ? (msg >= 75 ? msg - 20 : msg - 10) : msg - 5;
     }
 
     return null;

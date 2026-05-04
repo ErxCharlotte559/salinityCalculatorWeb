@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
+import { useEffect } from "react";
 import type { ApiResult, CalculationItem } from "@/lib/types";
 import type { StoreCode } from "@/lib/config";
 import { STORES, getPotCapacity, getTargetSalinity } from "@/lib/config";
@@ -19,10 +20,9 @@ export default function Home() {
 
     const [resData, setResData] = useState<ApiResult | null>(null);
     const [editableData, setEditableData] = useState<CalculationItem[]>([]);
-    const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>(
-        {},
-    );
-    const [showRawJson, setShowRawJson] = useState(false);
+
+    // const [showRawJson, setShowRawJson] = useState(false);
+    const [showTopBtn, setShowTopBtn] = useState(false);
 
     const [loading, setLoading] = useState(false);
     const [copied, setCopied] = useState(false);
@@ -43,12 +43,51 @@ export default function Home() {
             .join("\n");
     }, [editableData]);
 
+    useEffect(() => {
+        const handleScroll = () => {
+            if (window.scrollY > 300) {
+                setShowTopBtn(true);
+            } else {
+                setShowTopBtn(false);
+            }
+        };
+
+        window.addEventListener("scroll", handleScroll);
+
+        return () => {
+            window.removeEventListener("scroll", handleScroll);
+        };
+    }, []);
+
+    function scrollToTop() {
+        window.scrollTo({
+            top: 0,
+            behavior: "smooth",
+        });
+    }
+
+    function updateRawValue(
+        index: number,
+        key: "originalWeight" | "mixedWeight" | "meterReading",
+        value: string,
+    ) {
+        setEditableData((prev) => {
+            const copy = [...prev];
+
+            const updated: CalculationItem = {
+                ...copy[index],
+                [key]: value === "" ? null : Number(value),
+            };
+
+            copy[index] = recalculateItem(updated);
+            return copy;
+        });
+    }
+
     function handleFileChange(nextFile: File | null) {
         setFile(nextFile);
         setResData(null);
         setEditableData([]);
-        setExpandedRows({});
-        setShowRawJson(false);
         setCopied(false);
 
         if (previewUrl) {
@@ -89,8 +128,6 @@ export default function Home() {
         setLoading(true);
         setResData(null);
         setEditableData([]);
-        setExpandedRows({});
-        setShowRawJson(false);
         setCopied(false);
 
         try {
@@ -120,62 +157,6 @@ export default function Home() {
         }
     }
 
-    function updateSalinity(index: number, value: string) {
-        setEditableData((prev) => {
-            const copy = [...prev];
-
-            copy[index] = {
-                ...copy[index],
-                salinity: value === "" ? null : Number(value),
-            };
-
-            return copy;
-        });
-    }
-
-    function updateCapacity(index: number, value: string) {
-        setEditableData((prev) => {
-            const copy = [...prev];
-
-            copy[index] = {
-                ...copy[index],
-                capacity: value === "" ? null : Number(value),
-            };
-
-            return copy;
-        });
-    }
-
-    function updateWeightedValue(
-        index: number,
-        key:
-            | "tare1"
-            | "total1"
-            | "salinity1"
-            | "tare2"
-            | "total2"
-            | "temperature",
-        value: string,
-    ) {
-        setEditableData((prev) => {
-            const copy = [...prev];
-            const item = copy[index];
-
-            if (!item.weighted) return prev;
-
-            const updated: CalculationItem = {
-                ...item,
-                weighted: {
-                    ...item.weighted,
-                    [key]: value === "" ? null : Number(value),
-                },
-            };
-
-            copy[index] = recalculateItem(updated);
-            return copy;
-        });
-    }
-
     function resetEditableData() {
         setEditableData(
             (resData?.calculation ?? []).map((item) => ({
@@ -183,13 +164,6 @@ export default function Home() {
                 capacity: getPotCapacity(selectedStore, item.label),
             })),
         );
-    }
-
-    function toggleRow(index: number) {
-        setExpandedRows((prev) => ({
-            ...prev,
-            [index]: !prev[index],
-        }));
     }
 
     function changeStore(store: StoreCode) {
@@ -348,19 +322,22 @@ export default function Home() {
                             </button>
                         </div>
 
-                        <div className="-mx-3 overflow-x-auto px-3">
-                            <table className="min-w-190 border text-sm">
+                        <div className="overflow-x-auto rounded-xl border">
+                            <table className="w-full table-fixed text-xs">
                                 <thead>
                                     <tr className="bg-gray-100">
-                                        <th className="border p-2">品类</th>
-                                        <th className="border p-2">真实盐度</th>
-                                        <th className="border p-2">目标盐度</th>
-                                        <th className="border p-2">
-                                            锅容量(kg)
+                                        <th className="w-[12%] border p-1">
+                                            品类
                                         </th>
-                                        <th className="border p-2">温度</th>
-                                        <th className="border p-2">有效性</th>
-                                        <th className="border p-2">原始识别</th>
+                                        <th className="w-[30%] border p-1">
+                                            读数
+                                        </th>
+                                        <th className="w-[29%] border p-1">
+                                            原液
+                                        </th>
+                                        <th className="w-[29%] border p-1">
+                                            混合
+                                        </th>
                                     </tr>
                                 </thead>
 
@@ -370,173 +347,67 @@ export default function Home() {
                                             key={`${item.label}-${index}`}
                                         >
                                             <tr>
-                                                <td className="border p-2 font-medium">
-                                                    {item.type ===
-                                                    "weighted" ? (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() =>
-                                                                toggleRow(index)
-                                                            }
-                                                            className="mr-2 inline-flex h-8 w-8 items-center justify-center rounded-lg border text-xs"
-                                                        >
-                                                            {expandedRows[index]
-                                                                ? "▼"
-                                                                : "▶"}
-                                                        </button>
-                                                    ) : (
-                                                        <span className="mr-10" />
-                                                    )}
-
+                                                <td className="sticky left-0 z-10 border p-1 text-center font-semibold text-sm">
                                                     {item.label}
                                                 </td>
 
-                                                <td className="border p-2">
+                                                <td className="border p-1 text-center font-medium">
                                                     <input
-                                                        className="h-10 w-24 rounded-lg border px-2"
+                                                        className="w-full rounded border px-1 py-1 text-center text-sm"
                                                         type="number"
                                                         step="0.01"
                                                         value={
-                                                            item.salinity ?? ""
+                                                            item.meterReading ??
+                                                            ""
                                                         }
                                                         onChange={(e) =>
-                                                            updateSalinity(
+                                                            updateRawValue(
                                                                 index,
+                                                                "meterReading",
                                                                 e.target.value,
                                                             )
                                                         }
                                                     />
                                                 </td>
 
-                                                <td className="border p-2">
-                                                    {getTargetSalinity(
-                                                        item.label,
-                                                    ) ?? "-"}
-                                                </td>
-
-                                                <td className="border p-2">
+                                                <td className="border p-1 text-center font-medium">
                                                     <input
-                                                        className="h-10 w-28 rounded-lg border px-2"
+                                                        className="w-full rounded border px-1 py-1 text-center text-sm"
                                                         type="number"
-                                                        step="1"
+                                                        step="0.01"
                                                         value={
-                                                            item.capacity ?? ""
+                                                            item.originalWeight ??
+                                                            ""
                                                         }
                                                         onChange={(e) =>
-                                                            updateCapacity(
+                                                            updateRawValue(
                                                                 index,
+                                                                "originalWeight",
                                                                 e.target.value,
                                                             )
                                                         }
                                                     />
                                                 </td>
 
-                                                <td className="border p-2">
-                                                    {item.temperature === null
-                                                        ? "-"
-                                                        : `${item.temperature}°C`}
-                                                </td>
-
-                                                <td
-                                                    className={`border p-2 font-medium ${
-                                                        item.temperatureValid
-                                                            ? "text-green-700"
-                                                            : "text-red-600"
-                                                    }`}
-                                                >
-                                                    {item.temperatureValid
-                                                        ? "有效"
-                                                        : "无效"}
-                                                </td>
-
-                                                <td className="border p-2 text-gray-500">
-                                                    {item.raw}
+                                                <td className="border p-1 text-center font-medium">
+                                                    <input
+                                                        className="w-full rounded border px-1 py-1 text-center text-sm"
+                                                        type="number"
+                                                        step="0.01"
+                                                        value={
+                                                            item.mixedWeight ??
+                                                            ""
+                                                        }
+                                                        onChange={(e) =>
+                                                            updateRawValue(
+                                                                index,
+                                                                "mixedWeight",
+                                                                e.target.value,
+                                                            )
+                                                        }
+                                                    />
                                                 </td>
                                             </tr>
-
-                                            {item.type === "weighted" &&
-                                                item.weighted &&
-                                                expandedRows[index] && (
-                                                    <tr>
-                                                        <td
-                                                            colSpan={8}
-                                                            className="border bg-gray-50 p-3"
-                                                        >
-                                                            <div className="grid grid-cols-2 gap-3 text-sm">
-                                                                {(
-                                                                    [
-                                                                        [
-                                                                            "tare1",
-                                                                            "容器1",
-                                                                        ],
-                                                                        [
-                                                                            "total1",
-                                                                            "总重1",
-                                                                        ],
-                                                                        [
-                                                                            "salinity1",
-                                                                            "盐度1",
-                                                                        ],
-                                                                        [
-                                                                            "tare2",
-                                                                            "容器2",
-                                                                        ],
-                                                                        [
-                                                                            "total2",
-                                                                            "总重2",
-                                                                        ],
-                                                                        [
-                                                                            "temperature",
-                                                                            "温度2",
-                                                                        ],
-                                                                    ] as const
-                                                                ).map(
-                                                                    ([
-                                                                        key,
-                                                                        label,
-                                                                    ]) => (
-                                                                        <label
-                                                                            key={
-                                                                                key
-                                                                            }
-                                                                            className="space-y-1"
-                                                                        >
-                                                                            <span className="block text-gray-600">
-                                                                                {
-                                                                                    label
-                                                                                }
-                                                                            </span>
-
-                                                                            <input
-                                                                                className="h-10 w-full rounded-lg border px-2"
-                                                                                type="number"
-                                                                                step="0.01"
-                                                                                value={
-                                                                                    item
-                                                                                        .weighted?.[
-                                                                                        key
-                                                                                    ] ??
-                                                                                    ""
-                                                                                }
-                                                                                onChange={(
-                                                                                    e,
-                                                                                ) =>
-                                                                                    updateWeightedValue(
-                                                                                        index,
-                                                                                        key,
-                                                                                        e
-                                                                                            .target
-                                                                                            .value,
-                                                                                    )
-                                                                                }
-                                                                            />
-                                                                        </label>
-                                                                    ),
-                                                                )}
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                )}
                                         </Fragment>
                                     ))}
                                 </tbody>
@@ -567,7 +438,7 @@ export default function Home() {
                     </div>
                 )}
 
-                {resData && (
+                {/* {resData && (
                     <div>
                         <button
                             type="button"
@@ -583,8 +454,17 @@ export default function Home() {
                             </pre>
                         )}
                     </div>
-                )}
+                )} */}
             </div>
+
+            {showTopBtn && (
+                <button
+                    onClick={scrollToTop}
+                    className="fixed bottom-5 right-5 z-50 h-12 w-12 rounded-full bg-black text-white shadow-lg active:scale-95"
+                >
+                    ↑
+                </button>
+            )}
         </main>
     );
 }
