@@ -172,7 +172,13 @@ function calculateSpecialIngredient(
 
         if (msg === undefined) return null;
 
-        return msg >= 50 ? (msg >= 75 ? msg - 20 : msg - 10) : msg - 5;
+        return msg >= 110
+            ? 80
+            : msg >= 90
+              ? msg - 30
+              : msg >= 40
+                ? msg - 20
+                : msg - 5;
     }
 
     return null;

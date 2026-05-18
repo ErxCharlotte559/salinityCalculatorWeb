@@ -122,12 +122,13 @@ meterReading = 数值
                     },
                     {
                         type: "input_image",
+                        detail: "auto",
                         image_url: `data:${mimeType};base64,${base64}`,
                     },
                 ],
             },
         ],
-    } as any);
+    });
 
     console.log(response.output_text);
     const text = response.output_text;

@@ -1,25 +1,68 @@
 "use client";
 
+import Image from "next/image";
 import { Fragment, useMemo, useState } from "react";
 import { useEffect } from "react";
 import type { ApiResult, CalculationItem } from "@/lib/types";
 import type { StoreCode } from "@/lib/config";
-import { STORES, getPotCapacity, getTargetSalinity } from "@/lib/config";
+import {
+    STORES,
+    getPotCapacity,
+    getTargetSalinity,
+    isProductAvailableInStore,
+} from "@/lib/config";
 import {
     calculateIngredients,
     calculateSaltToAdd,
     recalculateItem,
 } from "@/lib/formula";
 
+const DEFAULT_LABELS = ["尖", "猪", "鸭", "辣", "牛", "鸡"];
+
+function getStoreLabels(store: StoreCode): string[] {
+    return DEFAULT_LABELS.filter((label) =>
+        isProductAvailableInStore(store, label),
+    );
+}
+
+function createEmptyRows(store: StoreCode): CalculationItem[] {
+    return getStoreLabels(store).map((label) => ({
+        label,
+        originalWeight: null,
+        mixedWeight: null,
+        meterReading: null,
+        salinity: null,
+        raw: "",
+        capacity: getPotCapacity(store, label),
+    }));
+}
+
+function mergeRowsWithStoreLabels(
+    emptyRows: CalculationItem[],
+    sourceRows: CalculationItem[],
+): CalculationItem[] {
+    return emptyRows.map((empty) => {
+        const found = sourceRows.find((item) => item.label === empty.label);
+
+        if (!found) return empty;
+
+        return {
+            ...found,
+            capacity: empty.capacity,
+        };
+    });
+}
+
 export default function Home() {
     const [file, setFile] = useState<File | null>(null);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
     const [selectedStore, setSelectedStore] = useState<StoreCode>("ew");
-    const [showStoreModal, setShowStoreModal] = useState(false);
 
     const [resData, setResData] = useState<ApiResult | null>(null);
-    const [editableData, setEditableData] = useState<CalculationItem[]>([]);
+    const [editableData, setEditableData] = useState<CalculationItem[]>(() =>
+        createEmptyRows("ew"),
+    );
 
     // const [showRawJson, setShowRawJson] = useState(false);
     const [showTopBtn, setShowTopBtn] = useState(false);
@@ -87,7 +130,6 @@ export default function Home() {
     function handleFileChange(nextFile: File | null) {
         setFile(nextFile);
         setResData(null);
-        setEditableData([]);
         setCopied(false);
 
         if (previewUrl) {
@@ -101,7 +143,7 @@ export default function Home() {
         }
     }
 
-    function openStoreModal(e: React.FormEvent<HTMLFormElement>) {
+    async function uploadSelectedStore(e: React.FormEvent<HTMLFormElement>) {
         e.preventDefault();
 
         if (!file) {
@@ -109,7 +151,7 @@ export default function Home() {
             return;
         }
 
-        setShowStoreModal(true);
+        await uploadWithStore(selectedStore);
     }
 
     async function uploadWithStore(store: StoreCode) {
@@ -119,7 +161,6 @@ export default function Home() {
         }
 
         setSelectedStore(store);
-        setShowStoreModal(false);
 
         const form = new FormData();
         form.append("image", file);
@@ -127,7 +168,6 @@ export default function Home() {
 
         setLoading(true);
         setResData(null);
-        setEditableData([]);
         setCopied(false);
 
         try {
@@ -138,15 +178,16 @@ export default function Home() {
 
             const data: ApiResult = await res.json();
 
-            const calculationWithCapacity = (data.calculation ?? []).map(
-                (item) => ({
-                    ...item,
-                    capacity: getPotCapacity(store, item.label),
-                }),
+            const recognizedRows = data.calculation ?? [];
+            const emptyRows = createEmptyRows(store);
+            const mergedRows = mergeRowsWithStoreLabels(
+                emptyRows,
+                recognizedRows,
             );
 
+            setEditableData(mergedRows);
+
             setResData(data);
-            setEditableData(calculationWithCapacity);
         } catch {
             setResData({
                 ok: false,
@@ -158,23 +199,22 @@ export default function Home() {
     }
 
     function resetEditableData() {
-        setEditableData(
-            (resData?.calculation ?? []).map((item) => ({
-                ...item,
-                capacity: getPotCapacity(selectedStore, item.label),
-            })),
-        );
+        const recognizedRows = resData?.calculation ?? [];
+        const emptyRows = createEmptyRows(selectedStore);
+
+        setEditableData(mergeRowsWithStoreLabels(emptyRows, recognizedRows));
     }
 
     function changeStore(store: StoreCode) {
         setSelectedStore(store);
 
         setEditableData((prev) =>
-            prev.map((item) => ({
-                ...item,
-                capacity: getPotCapacity(store, item.label),
-            })),
+            mergeRowsWithStoreLabels(createEmptyRows(store), prev),
         );
+    }
+
+    function clearEditableData() {
+        setEditableData(createEmptyRows(selectedStore));
     }
 
     async function copyResult() {
@@ -189,11 +229,11 @@ export default function Home() {
     }
 
     return (
-        <main className="min-h-screen bg-gray-50 px-3 py-4">
+        <main className="min-h-screen bg-gray-50 px-3 py-4 text-black">
             <div className="mx-auto w-full max-w-md space-y-5">
                 <h1 className="text-center text-2xl font-bold">盐度计算</h1>
 
-                <form onSubmit={openStoreModal} className="space-y-4">
+                <form onSubmit={uploadSelectedStore} className="space-y-4">
                     <div>
                         <label className="mb-2 block text-sm font-semibold">
                             选择图片
@@ -221,30 +261,28 @@ export default function Home() {
                         </label>
                     </div>
 
-                    {resData && (
-                        <div>
-                            <label className="mb-2 block text-sm font-semibold">
-                                当前门店
-                            </label>
+                    <div>
+                        <label className="mb-2 block text-sm font-semibold">
+                            当前门店
+                        </label>
 
-                            <div className="grid grid-cols-3 gap-2">
-                                {STORES.map((store) => (
-                                    <button
-                                        key={store.code}
-                                        type="button"
-                                        onClick={() => changeStore(store.code)}
-                                        className={`min-h-11 rounded-xl border px-2 py-2 text-sm font-medium ${
-                                            selectedStore === store.code
-                                                ? "border-black bg-black text-white"
-                                                : "border-gray-300 bg-white text-black"
-                                        }`}
-                                    >
-                                        {store.name}
-                                    </button>
-                                ))}
-                            </div>
+                        <div className="grid grid-cols-3 gap-2">
+                            {STORES.map((store) => (
+                                <button
+                                    key={store.code}
+                                    type="button"
+                                    onClick={() => changeStore(store.code)}
+                                    className={`min-h-11 rounded-xl border px-2 py-2 text-sm font-medium ${
+                                        selectedStore === store.code
+                                            ? "border-black bg-black text-white"
+                                            : "border-gray-300 bg-white text-black"
+                                    }`}
+                                >
+                                    {store.name}
+                                </button>
+                            ))}
                         </div>
-                    )}
+                    </div>
 
                     {previewUrl && (
                         <div className="rounded-2xl border bg-white p-3 shadow-sm">
@@ -252,9 +290,12 @@ export default function Home() {
                                 图片预览
                             </div>
 
-                            <img
+                            <Image
                                 src={previewUrl}
                                 alt="盐度图片预览"
+                                width={640}
+                                height={480}
+                                unoptimized
                                 className="max-h-[60vh] w-full rounded-xl object-contain"
                             />
                         </div>
@@ -269,39 +310,6 @@ export default function Home() {
                     </button>
                 </form>
 
-                {showStoreModal && (
-                    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center">
-                        <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
-                            <h2 className="mb-4 text-lg font-bold">
-                                请选择门店
-                            </h2>
-
-                            <div className="grid gap-3">
-                                {STORES.map((store) => (
-                                    <button
-                                        key={store.code}
-                                        type="button"
-                                        onClick={() =>
-                                            uploadWithStore(store.code)
-                                        }
-                                        className="min-h-12 rounded-xl border bg-white px-4 py-3 text-left font-medium active:bg-gray-100"
-                                    >
-                                        {store.name}
-                                    </button>
-                                ))}
-                            </div>
-
-                            <button
-                                type="button"
-                                onClick={() => setShowStoreModal(false)}
-                                className="mt-4 h-11 w-full rounded-xl border text-sm font-medium"
-                            >
-                                取消
-                            </button>
-                        </div>
-                    </div>
-                )}
-
                 {resData?.error && (
                     <div className="rounded-2xl border border-red-300 bg-red-50 p-4 text-sm text-red-700">
                         {resData.error}
@@ -309,21 +317,31 @@ export default function Home() {
                 )}
 
                 {editableData.length > 0 && (
-                    <div className="rounded-2xl border bg-white p-3 shadow-sm">
+                    <div className="rounded-2xl border bg-white p-3 text-black shadow-sm">
                         <div className="mb-3 flex items-center justify-between gap-3">
                             <h2 className="text-lg font-bold">计算结果</h2>
 
-                            <button
-                                type="button"
-                                onClick={resetEditableData}
-                                className="shrink-0 rounded-xl border px-3 py-2 text-sm font-medium"
-                            >
-                                恢复识别值
-                            </button>
+                            <div className="flex shrink-0 gap-2">
+                                <button
+                                    type="button"
+                                    onClick={clearEditableData}
+                                    className="rounded-xl border px-3 py-2 text-sm font-medium"
+                                >
+                                    清空表格
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onClick={resetEditableData}
+                                    className="rounded-xl border px-3 py-2 text-sm font-medium"
+                                >
+                                    恢复识别值
+                                </button>
+                            </div>
                         </div>
 
                         <div className="overflow-x-auto rounded-xl border">
-                            <table className="w-full table-fixed text-xs">
+                            <table className="w-full table-fixed bg-white text-xs text-black">
                                 <thead>
                                     <tr className="bg-gray-100">
                                         <th className="w-[12%] border p-1">
@@ -347,13 +365,13 @@ export default function Home() {
                                             key={`${item.label}-${index}`}
                                         >
                                             <tr>
-                                                <td className="sticky left-0 z-10 border p-1 text-center font-semibold text-sm">
+                                                <td className="sticky left-0 z-10 border bg-white p-1 text-center text-sm font-semibold text-black">
                                                     {item.label}
                                                 </td>
 
                                                 <td className="border p-1 text-center font-medium">
                                                     <input
-                                                        className="w-full rounded border px-1 py-1 text-center text-sm"
+                                                        className="w-full rounded border bg-white px-1 py-1 text-center text-sm text-black"
                                                         type="number"
                                                         step="0.01"
                                                         value={
@@ -372,7 +390,7 @@ export default function Home() {
 
                                                 <td className="border p-1 text-center font-medium">
                                                     <input
-                                                        className="w-full rounded border px-1 py-1 text-center text-sm"
+                                                        className="w-full rounded border bg-white px-1 py-1 text-center text-sm text-black"
                                                         type="number"
                                                         step="0.01"
                                                         value={
@@ -391,7 +409,7 @@ export default function Home() {
 
                                                 <td className="border p-1 text-center font-medium">
                                                     <input
-                                                        className="w-full rounded border px-1 py-1 text-center text-sm"
+                                                        className="w-full rounded border bg-white px-1 py-1 text-center text-sm text-black"
                                                         type="number"
                                                         step="0.01"
                                                         value={
@@ -417,7 +435,7 @@ export default function Home() {
                 )}
 
                 {editableData.length > 0 && (
-                    <div className="rounded-2xl border bg-white p-4 shadow-sm">
+                    <div className="rounded-2xl border bg-white p-4 text-black shadow-sm">
                         <div className="mb-3 flex items-center justify-between gap-3">
                             <h2 className="text-lg font-bold">添加结果</h2>
 
@@ -430,8 +448,8 @@ export default function Home() {
                             </button>
                         </div>
 
-                        <div className="rounded-xl bg-gray-50 p-4">
-                            <pre className="whitespace-pre-wrap wrap-break-word text-base font-semibold leading-8">
+                        <div className="rounded-xl bg-gray-50 p-4 text-black">
+                            <pre className="whitespace-pre-wrap wrap-break-word text-base font-semibold leading-8 text-black">
                                 {outputText}
                             </pre>
                         </div>
